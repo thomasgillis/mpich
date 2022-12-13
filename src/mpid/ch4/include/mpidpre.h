@@ -193,6 +193,7 @@ typedef struct MPIDIG_req_t {
     void *rndv_hdr;
     void *buffer;
     MPI_Aint count;
+    MPI_Aint offset;            /* offset in byte to apply to the buffer */
     MPI_Datatype datatype;
     union {
         struct {

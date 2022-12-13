@@ -174,11 +174,16 @@ MPL_STATIC_INLINE_PREFIX void MPIDIG_recv_copy(void *in_data, MPIR_Request * rre
         MPIR_STATUS_SET_COUNT(rreq->status, 0);
     } else if (p->recv_type == MPIDIG_RECV_DATATYPE) {
         MPI_Aint actual_unpack_bytes;
-        MPIR_Typerep_unpack(in_data, in_data_sz,
-                            MPIDIG_REQUEST(rreq, buffer),
-                            MPIDIG_REQUEST(rreq, count),
-                            MPIDIG_REQUEST(rreq, datatype),
-                            0, &actual_unpack_bytes, MPIR_TYPEREP_FLAG_NONE);
+        fprintf(stdout, "unpacking from %p: count = %ld, offset = %ld\n",
+                MPIDIG_REQUEST(rreq, buffer), MPIDIG_REQUEST(rreq, count), MPIDIG_REQUEST(rreq,
+                                                                                          offset));
+        MPIR_Typerep_unpack(in_data, in_data_sz, MPIDIG_REQUEST(rreq, buffer),
+                            MPIDIG_REQUEST(rreq, count), MPIDIG_REQUEST(rreq, datatype),
+                            MPIDIG_REQUEST(rreq, offset), &actual_unpack_bytes,
+                            MPIR_TYPEREP_FLAG_NONE);
+        fprintf(stdout, "I have unpacked %ld bytes from %p: count = %ld, offset = %ld\n",
+                actual_unpack_bytes, MPIDIG_REQUEST(rreq, buffer), MPIDIG_REQUEST(rreq, count),
+                MPIDIG_REQUEST(rreq, offset));
         if (!rreq->status.MPI_ERROR && in_data_sz > actual_unpack_bytes) {
             /* Truncation error has been checked at MPIDIG_recv_type_init.
              * If the receive buffer had enough space, but we still
@@ -193,8 +198,9 @@ MPL_STATIC_INLINE_PREFIX void MPIDIG_recv_copy(void *in_data, MPIR_Request * rre
         }
         MPIR_STATUS_SET_COUNT(rreq->status, actual_unpack_bytes);
     } else if (p->recv_type == MPIDIG_RECV_CONTIG) {
-        /* contig case */
-        void *data = p->iov_one.iov_base;
+        fprintf(stdout, "unpacking contig data\n");
+        /* contig case the data pointer */
+        void *data = (char *) p->iov_one.iov_base + MPIDIG_REQUEST(rreq, offset);
         MPI_Aint data_sz = p->iov_one.iov_len;
         if (in_data_sz > data_sz) {
             rreq->status.MPI_ERROR = MPIDIG_ERR_TRUNCATE(data_sz, in_data_sz);
@@ -204,18 +210,23 @@ MPL_STATIC_INLINE_PREFIX void MPIDIG_recv_copy(void *in_data, MPIR_Request * rre
         MPIR_Typerep_copy(data, in_data, data_sz, MPIR_TYPEREP_FLAG_NONE);
         MPIR_STATUS_SET_COUNT(rreq->status, data_sz);
     } else {
+        fprintf(stdout, "unpacking non-contig data\n");
         /* noncontig case */
         struct iovec *iov = p->iov_ptr;
         int iov_len = p->iov_num;
 
         int done = 0;
         int rem = in_data_sz;
+        int offset = MPIDIG_REQUEST(rreq, offset);
         for (int i = 0; i < iov_len && rem > 0; i++) {
-            int curr_len = MPL_MIN(rem, iov[i].iov_len);
-            MPIR_Typerep_copy(iov[i].iov_base, (char *) in_data + done, curr_len,
-                              MPIR_TYPEREP_FLAG_NONE);
+            /* not copy anything (curr_len = 0) while the offset > iov[i].len */
+            int curr_len = MPL_MIN(rem, MPL_MAX(iov[i].iov_len - offset, 0));
+            // TODO: should we add a if curr_len > 0 here? > the check if done in typerep_do_copy
+            MPIR_Typerep_copy((char *) iov[i].iov_base + offset, (char *) in_data + done,
+                              curr_len, MPIR_TYPEREP_FLAG_NONE);
             rem -= curr_len;
             done += curr_len;
+            offset = MPL_MAX(offset - iov[i].iov_len, 0);
         }
 
         if (rem) {

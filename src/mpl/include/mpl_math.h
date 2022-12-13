@@ -81,6 +81,16 @@ static inline int MPL_gcd(int a, int b)
     return (a == 0) ? b : MPL_gcd(b % a, a);
 }
 
+/* returns the Greatest Divisor of `a` Lower Than `b` (starting with `c`) */
+static inline int MPL_gdlt(const int a,const int b,const int c){
+    int res = c;
+    // while we are not a divisor of a and we ca
+    do {
+        res+=1;
+    } while (a%res && res<a);
+    return (res > b || res>a)? c : MPL_gdlt(a,b,res);
+}
+
 /* get the number at 'digit'th location in base k representation of 'number' */
 static inline int MPL_getdigit(int k, int number, int digit)
 {

@@ -103,20 +103,53 @@ void MPIDIG_part_rreq_update_sinfo(MPIR_Request * rreq, MPIDIG_part_send_init_ms
     MPIDIG_PART_REQUEST(rreq, u.recv.send_dsize) = msg_hdr->data_sz;
     MPIDIG_PART_REQUEST(rreq, peer_req_ptr) = msg_hdr->sreq_ptr;
 
-    /* the communication unit is the minimal number of datatypes that must be sent at once to avoid fraction of datatypes
-     * This unit is different on the send and receive side but the number of messages it corresponds to is the same on both side
-     * It can be obtained as the GCD of the total number of datatypes at both sides.
-     * */
-    const int send_npart = msg_hdr->send_npart;
-    const int send_ttl_count = msg_hdr->send_ttl_dcount;
-    const int recv_ttl_count = rreq->u.part.partitions * MPIDI_PART_REQUEST(rreq, count);
-    const int unit_ttl_msg = MPL_gcd(send_ttl_count, recv_ttl_count);
+    if (MPIR_CVAR_PART_AM_ALGO == MPIR_CVAR_PART_AM_ALGO_NONE) {
+        fprintf(stdout, "no algo selected, will use %d msgs \n", msg_hdr->send_npart);
+        MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) = msg_hdr->send_npart;
+    } else {
+        int unit_ttl_msg = 0;
+        const int send_npart = msg_hdr->send_npart;
+        const int recv_ttl_count = rreq->u.part.partitions * MPIDI_PART_REQUEST(rreq, count);
 
-    /* we can choose to send any integer faction of unit_ttl_msg, they will all satisfy the no-faction datatype rule
-     * it's convenient to send a multiple of the number of partitions as it's user-based */
-    /* TODO this is a bit of cooking, the only requirement here is to be a divider of the unit_ttl_msg number! */
-    /* TODO link to MTU here */
-    MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) = MPL_gcd(unit_ttl_msg, send_npart);
+        if (MPIR_CVAR_PART_AM_ALGO == MPIR_CVAR_PART_AM_ALGO_GCD_PART) {
+            /* we take the gcd between the number of send and recv partitions to avoid any issues */
+            const int recv_npart = rreq->u.part.partitions;
+            unit_ttl_msg = MPL_gcd(recv_npart, send_npart);
+        } else if (MPIR_CVAR_PART_AM_ALGO == MPIDIG_PART_AM_GCD_DTYPE) {
+            /* the communication unit is the minimal number of datatypes that must be sent at once to avoid fraction of datatypes
+             * This unit is different on the send and receive side but the number of messages it corresponds to is the same on both side
+             * It can be obtained as the GCD of the total number of datatypes at both sides.
+             * */
+            const int send_ttl_count = msg_hdr->send_ttl_dcount;
+            unit_ttl_msg = MPL_gcd(send_ttl_count, recv_ttl_count);
+        } else {
+            /* not supported */
+            MPIR_Assert(0);
+        }
+        /* we now try to gather msgs together to come as close as possible to the threshold */
+        if (MPIR_CVAR_PART_AM_AGGREGATE_MAX_SIZE > 0) {
+            MPI_Aint dsize;
+            MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(rreq, datatype), dsize);
+
+            const MPI_Aint unit_msg_size = dsize * recv_ttl_count / unit_ttl_msg;
+            const MPI_Aint n_msg_max =
+                MPL_MAX(MPIR_CVAR_PART_AM_AGGREGATE_MAX_SIZE / unit_msg_size, 1);
+
+            /*obtain the greatest number of msgs that fits in the aggregate size but it a multiple of unit_ttl_msg */
+            const MPI_Aint n_msg_per_aggr = MPL_gdlt(unit_ttl_msg, n_msg_max, 1);
+            MPIR_Assert(unit_ttl_msg % n_msg_per_aggr == 0);
+            MPIR_Assert(unit_ttl_msg >= n_msg_per_aggr == 0);
+            MPIR_Assert(unit_ttl_msg >= n_msg_max == 0);
+
+            MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) = unit_ttl_msg / n_msg_per_aggr;
+        } else {
+            ///* we can choose to send any integer faction of unit_ttl_msg, they will all satisfy the no-faction datatype rule
+            // * it's convenient to send a multiple of the number of partitions as it's user-based */
+            // MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) = MPL_gcd(unit_ttl_msg, send_npart);
+            MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) = unit_ttl_msg;
+            fprintf(stdout, "algo GCD selected, will use %d msgs \n", unit_ttl_msg);
+        }
+    }
 
     /* 0 partition is illegual so at least one message must happen */
     MPIR_Assert(MPIDIG_PART_REQUEST(rreq, u.recv.msg_part) > 0);

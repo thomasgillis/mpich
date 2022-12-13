@@ -298,6 +298,7 @@ static int typerep_do_unpack(const void *inbuf, MPI_Aint insize, void *outbuf, M
         outbuf_ptr = MPIR_get_contig_ptr(outbuf, dtp->true_lb);
         total_size = outcount * dtp->size;
     }
+    MPIR_Assert(total_size >= outoffset + insize);
 
     MPL_pointer_attr_t inattr, outattr;
 

@@ -7,6 +7,7 @@
 
 #include "ch4_impl.h"
 
+
 /* defines the different stages a send partitions must go through */
 enum MPIDIG_part_status_send_cc_t {
     MPIDIG_PART_STATUS_SEND_READY,      /* 0 = partition is ready to be sent */
@@ -24,7 +25,16 @@ enum MPIDIG_part_status_recv_cc_t {
     MPIDIG_PART_STATUS_RECV_INIT
 };
 
-/* functions defined in .c */ void MPIDIG_part_rreq_create(MPIR_Request ** req);
+enum MPIDIG_part_algorithm {
+    MPIDIG_PART_AM_GCD_NONE,
+    MPIDIG_PART_AM_GCD_DTYPE,
+    MPIDIG_PART_AM_GCD_PART
+};
+
+#define MPIDIG_PART_ALGO MPIDIG_PART_AM_GCD_DTYPE
+
+/* functions defined in .c */
+void MPIDIG_part_rreq_create(MPIR_Request ** req);
 void MPIDIG_part_sreq_create(MPIR_Request ** req);
 
 void MPIDIG_part_rreq_reset_cc_part(MPIR_Request * rqst);

@@ -6,8 +6,42 @@
 #ifndef MPIDIG_AM_PART_H_INCLUDED
 #define MPIDIG_AM_PART_H_INCLUDED
 
+
 #include "ch4_impl.h"
 #include "mpidig_part_utils.h"
+
+/*
+=== BEGIN_MPI_T_CVAR_INFO_BLOCK ===
+categories :
+   - name : PARTITION
+     description : A category for partitioned communication variables.
+
+cvars:
+    - name        : MPIR_CVAR_PART_AM_ALGO
+      category    : PARTITION
+      type        : enum
+      default     : NONE
+      class       : none
+      verbosity   : MPI_T_VERBOSITY_USER_BASIC
+      scope       : MPI_T_SCOPE_ALL_EQ
+      description : |-
+        Variable to select the number of msgs to be sent when using AM
+        NONE - the number of msgs is the number of partitions on the sender side.
+        GCD_PART - the number of msgs is the gcd of the number of partitions on both sides.
+        GCD_DTYPE - the number of msgs is the gcd of the number of total datatypes on both sides.
+
+    - name        : MPIR_CVAR_PART_AM_AGGREGATE_MAX_SIZE
+      category    : PARTITION
+      type        : int
+      default     : -1
+      class       : none
+      verbosity   : MPI_T_VERBOSITY_USER_BASIC
+      scope       : MPI_T_SCOPE_ALL_EQ
+      description : >-
+        if > 0 attempt to gather messages together up to the given size, disabled otherwise
+
+=== END_MPI_T_CVAR_INFO_BLOCK ===
+*/
 
 int MPIDIG_mpi_psend_init(const void *buf, int partitions, MPI_Aint count,
                           MPI_Datatype datatype, int dest, int tag,

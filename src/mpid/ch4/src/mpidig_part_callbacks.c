@@ -137,6 +137,14 @@ int MPIDIG_part_cts_target_msg_cb(void *am_hdr, void *data,
     if (is_first_cts) {
         MPIDIG_PART_REQUEST(part_sreq, peer_req_ptr) = msg_hdr->rreq_ptr;
         MPIDIG_PART_REQUEST(part_sreq, u.send.msg_part) = msg_hdr->msg_part;
+
+#ifndef NDEBUG
+        /* make sure we don't split up a datatype */
+        MPI_Aint count;
+        MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(part_sreq, datatype), count);
+        count *= part_sreq->u.part.partitions * MPIDI_PART_REQUEST(part_sreq, count);
+        MPIR_Assert(count % MPIDIG_PART_REQUEST(part_sreq, u.send.msg_part) == 0);
+#endif
     }
     MPIR_Assert(MPIDIG_PART_REQUEST(part_sreq, peer_req_ptr) == msg_hdr->rreq_ptr);
     MPIR_Assert(MPIDIG_PART_REQUEST(part_sreq, u.send.msg_part) == msg_hdr->msg_part);
@@ -175,8 +183,7 @@ int MPIDIG_part_cts_target_msg_cb(void *am_hdr, void *data,
     goto fn_exit;
 }
 
-/* Callback on receiver, triggered when received actual data from sender.
- * It copies data into recvbuf and set local part_rreq complete. */
+/* Callback on receiver, triggered when received actual data from sender. It copies data into recvbuf and set local part_rreq complete. */
 int MPIDIG_part_send_data_target_msg_cb(void *am_hdr, void *data,
                                         MPI_Aint in_data_sz, uint32_t attr, MPIR_Request ** req)
 {
@@ -199,21 +206,52 @@ int MPIDIG_part_send_data_target_msg_cb(void *am_hdr, void *data,
     MPIR_Assert(imsg >= 0);
     MPIR_Assert(imsg < msg_part);
 
-    /* get the count of the msg received */
-    MPI_Aint count = MPIDI_PART_REQUEST(part_rreq, count) * part_rreq->u.part.partitions;
-    MPIR_Assert(count % msg_part == 0);
-    count /= msg_part;
-
-    /* get the exact buffer location given the ipart and the offset */
-    MPI_Aint part_offset;
-    MPIR_Datatype_get_extent_macro(MPIDI_PART_REQUEST(part_rreq, datatype), part_offset);
-    part_offset *= count;
-    void *buffer = (char *) MPIDI_PART_REQUEST(part_rreq, buffer) + imsg * part_offset;
-
-    MPIDIG_REQUEST(rreq, count) = count;
-    MPIDIG_REQUEST(rreq, buffer) = buffer;
+    /* the buffer is the start address of the user's buffer, the offset is computed
+     * below and depends on the GCD approach taken*/
+    MPIDIG_REQUEST(rreq, buffer) = MPIDI_PART_REQUEST(part_rreq, buffer);
     MPIDIG_REQUEST(rreq, datatype) = MPIDI_PART_REQUEST(part_rreq, datatype);
     MPIDIG_REQUEST(rreq, req->target_cmpl_cb) = part_send_data_target_cmpl_cb;
+
+    MPI_Aint dsize;             /* size in byte of the data to be received */
+    MPI_Aint count;             /* the number of recv datatypes to be received */
+    if (MPIR_CVAR_PART_AM_ALGO == MPIR_CVAR_PART_AM_ALGO_NONE) {
+        /* if we don't use any GCD then the start/end of the receive might be in the middle of a datatype.
+         * the dsize is the only accurate measure we have and is sufficient with the offset
+         * the count value contains the total number of datatype which is valid*/
+        count = MPIDI_PART_REQUEST(part_rreq, count) * part_rreq->u.part.partitions;
+        MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(part_rreq, datatype), dsize);
+        MPIR_Assert((count * dsize) % msg_part == 0);
+        fprintf(stdout, "RECV: dsize = %ld * %ld / %d = %ld", dsize, count, msg_part,
+                dsize * count / msg_part);
+        dsize = (dsize * count) / msg_part;
+
+
+        /* all the msgs are the same size */
+        MPIDIG_REQUEST(rreq, offset) = imsg * dsize;
+    } else {
+        /* if we used a GCD approach then we are sure that no fraction of datatype will be received
+         * the count is then the number of received datatype in the msg*/
+        count = MPIDI_PART_REQUEST(part_rreq, count) * part_rreq->u.part.partitions;
+        MPIR_Assert(count % msg_part == 0);
+        count /= msg_part;
+        MPIDIG_REQUEST(rreq, count) = count;
+
+        /* the offset in the buffer is the msg id * the size of a msg on the user side (with extent!) */
+        MPI_Aint part_offset;
+        MPIR_Datatype_get_extent_macro(MPIDI_PART_REQUEST(part_rreq, datatype), part_offset);
+        part_offset *= count;
+        MPIDIG_REQUEST(rreq, offset) = imsg * part_offset;
+
+        /* the datasize */
+        MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(part_rreq, datatype), dsize);
+        dsize *= count;
+    }
+    MPIDIG_REQUEST(rreq, count) = count;
+    MPI_Aint tmp_size;
+    MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(part_rreq, datatype), tmp_size);
+    fprintf(stdout, "RECV: data size = %ld, msgs size = %ld, count = %ld, offset = %ld\n", tmp_size,
+            dsize, count, MPIDIG_REQUEST(rreq, offset));
+    fflush(stdout);
 
     /*register the cc_part ptr to complete the partition's counter as well once the callback is called */
     MPIR_cc_t *cc_part = MPIDIG_PART_REQUEST(part_rreq, u.recv.cc_part);
@@ -227,9 +265,6 @@ int MPIDIG_part_send_data_target_msg_cb(void *am_hdr, void *data,
     MPIDIG_REQUEST(rreq, req->part_am_req.part_req_ptr) = part_rreq;
 
     /* Data may be segmented in pipeline AM type; initialize with total send size */
-    MPI_Aint dsize;
-    MPIR_Datatype_get_size_macro(MPIDI_PART_REQUEST(part_rreq, datatype), dsize);
-    dsize *= count;
     MPIDIG_recv_type_init(dsize, rreq);
 
     if (attr & MPIDIG_AM_ATTR__IS_ASYNC) {
