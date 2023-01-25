@@ -33,26 +33,14 @@ MPL_STATIC_INLINE_PREFIX int get_vci_wrapper(MPIR_Request * req)
     return vci;
 }
 
-MPL_STATIC_INLINE_PREFIX void MPIDI_set_progress_vci(MPIR_Request * req,
-                                                     MPID_Progress_state * state)
+/* append the VCI to the vci_count existing progress state */
+MPL_STATIC_INLINE_PREFIX void MPIDI_append_progress_vci_n(int n, MPIR_Request ** reqs,
+                                                          MPID_Progress_state * state)
 {
     state->flag = MPIDI_PROGRESS_ALL;   /* TODO: check request is_local/anysource */
     state->progress_made = 0;
 
-    int vci = get_vci_wrapper(req);
-
-    state->progress_counts[0] = MPL_atomic_relaxed_load_int(&MPIDI_VCI(vci).progress_count);
-    state->vci_count = 1;
-    state->vci[0] = vci;
-}
-
-MPL_STATIC_INLINE_PREFIX void MPIDI_set_progress_vci_n(int n, MPIR_Request ** reqs,
-                                                       MPID_Progress_state * state)
-{
-    state->flag = MPIDI_PROGRESS_ALL;   /* TODO: check request is_local/anysource */
-    state->progress_made = 0;
-
-    int idx = 0;
+    int idx = state->vci_count;
     for (int i = 0; i < n; i++) {
         if (reqs[i] == NULL) {
             continue;
@@ -71,10 +59,45 @@ MPL_STATIC_INLINE_PREFIX void MPIDI_set_progress_vci_n(int n, MPIR_Request ** re
             MPIR_Assert(vci < MPIDI_global.n_total_vcis);
         }
     }
-    state->vci_count = idx;
-    for (int i = 0; i < state->vci_count; i++) {
+    for (int i = state->vci_count; i < idx; i++) {
         int vci = state->vci[i];
         state->progress_counts[i] = MPL_atomic_relaxed_load_int(&MPIDI_VCI(vci).progress_count);
+    }
+    state->vci_count = idx;
+}
+
+MPL_STATIC_INLINE_PREFIX void MPIDI_set_progress_vci_n(int n, MPIR_Request ** reqs,
+                                                       MPID_Progress_state * state)
+{
+    state->vci_count = 0;
+    MPIDI_append_progress_vci_n(n, reqs, state);
+}
+
+MPL_STATIC_INLINE_PREFIX void MPIDI_set_progress_vci(MPIR_Request * req,
+                                                     MPID_Progress_state * state)
+{
+    state->flag = MPIDI_PROGRESS_ALL;   /* TODO: check request is_local/anysource */
+    state->progress_made = 0;
+
+    int vci = get_vci_wrapper(req);
+    state->progress_counts[0] = MPL_atomic_relaxed_load_int(&MPIDI_VCI(vci).progress_count);
+    state->vci_count = 1;
+    state->vci[0] = vci;
+
+    /* try to see if we have some child requests
+     * we append the child's VCI to make sure we progress on both the main request and the child
+     * ones. This avoids deadlocks when waiting for CTS/RTS etc (typical in partitioned comm)*/
+    int n_child_req = 0;
+    MPIR_Request **child_req = NULL;
+    if (req->kind == MPIR_REQUEST_KIND__PART_SEND) {
+        child_req = MPIDIG_PART_REQUEST(req, tag_req_ptr);
+        n_child_req = MPIDIG_PART_REQUEST(req, u.send.msg_part);
+    } else if (req->kind == MPIR_REQUEST_KIND__PART_RECV) {
+        child_req = MPIDIG_PART_REQUEST(req, tag_req_ptr);
+        n_child_req = MPIDIG_PART_REQUEST(req, u.recv.msg_part);
+    }
+    if (n_child_req > 0 && child_req) {
+        MPIDI_append_progress_vci_n(n_child_req, child_req, state);
     }
 }
 
