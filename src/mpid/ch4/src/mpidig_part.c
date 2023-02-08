@@ -8,7 +8,6 @@
 #include "mpidig_part_utils.h"
 #include "mpidpre.h"
 
-
 /*
 === BEGIN_MPI_T_CVAR_INFO_BLOCK ===
 
@@ -27,6 +26,19 @@ cvars:
       description : >-
         The maximum number of simultaneous partitioned communications initiated from a given process
         on a communicator
+    - name        : MPIR_CVAR_PART_NONSTD_RMA
+      category    : PARTITION
+      type        : int
+      default     : 0
+      class       : none
+      verbosity   : MPI_T_VERBOSITY_USER_BASIC
+      scope       : MPI_T_SCOPE_LOCAL
+      description : >-
+        Enable the non-standard compliant RMA implementation of the partitioned communication.
+        It does NOT comply to the MPI-standard but can be beneficial in some use-cases.
+        Particularly we note the following difference with the MPI-standard
+        - the Psend_init/Precv_init are blocking
+        - MPI_Parrived will always return false
 
 === END_MPI_T_CVAR_INFO_BLOCK ===
 */
@@ -110,9 +122,15 @@ int MPIDIG_mpi_psend_init(const void *buf, int partitions, MPI_Aint count, MPI_D
     /* we decide if we use the AM or the regular send code path using tags
      * due to the tag structure we can only perform a given number of simultaneous
      * partitioned communications */
-    const bool do_tag = MPIR_cc_get(comm->part_context_cc) < MPIR_CVAR_PART_MAXREQ_PERCOMM;
+    const bool do_rma = (MPIR_CVAR_PART_NONSTD_RMA > 0);
+    const bool do_tag = (MPIR_cc_get(comm->part_context_cc) < MPIR_CVAR_PART_MAXREQ_PERCOMM);
     MPIR_cc_inc(&comm->part_context_cc);
-    if (do_tag) {
+    if (do_rma) {
+        /* Initialize tag-matching components for send */
+        MPIDIG_PART_REQUEST(*request, mode) = 2;
+        MPIDIG_PART_REQUEST(*request, peer_req_ptr) = NULL;
+
+    } else if (do_tag) {
         /* Initialize tag-matching components for send */
         MPIDIG_PART_REQUEST(*request, mode) = 1;
         const int send_part = partitions;
@@ -121,8 +139,6 @@ int MPIDIG_mpi_psend_init(const void *buf, int partitions, MPI_Aint count, MPI_D
         for (int i = 0; i < send_part; ++i) {
             MPIDIG_PART_SREQUEST(*request, tag_req_ptr[i]) = NULL;
         }
-        /* initialize counters usually done at the first CTS in AM */
-        //MPIDIG_PART_REQUEST(*request, u.send.msg_part) = partitions;
     } else {
         /* Initialize am components for send */
         MPIDIG_PART_REQUEST(*request, mode) = 0;
@@ -138,7 +154,7 @@ int MPIDIG_mpi_psend_init(const void *buf, int partitions, MPI_Aint count, MPI_D
     am_hdr.tag = tag;
     am_hdr.context_id = comm->context_id;
     am_hdr.sreq_ptr = *request;
-    am_hdr.do_tag = do_tag;
+    am_hdr.mode = MPIDIG_PART_REQUEST(*request, mode);
 
     MPI_Aint dtype_size = 0;
     MPIR_Datatype_get_size_macro(datatype, dtype_size);
@@ -151,6 +167,42 @@ int MPIDIG_mpi_psend_init(const void *buf, int partitions, MPI_Aint count, MPI_D
     /* send the header */
     CH4_CALL(am_send_hdr(dest, comm, MPIDIG_PART_SEND_INIT, &am_hdr, sizeof(am_hdr), 0, 0),
              MPIDI_REQUEST(*request, is_local), mpi_errno);
+
+    //--------------------------------------------------------------------------
+    /* once the handshake is sent we create the window and block until the RECV does the same */
+    if (do_rma) {
+        /* create a comm exclusively for the send and recv */
+        MPIR_Group *comm_group;
+        mpi_errno = MPIR_Comm_group_impl(comm, &comm_group);
+        MPIR_ERR_CHECK(mpi_errno);
+
+        int rank_list[2];
+        mpi_errno = MPIR_Comm_rank_impl(comm, rank_list);
+        rank_list[1] = dest;
+        MPIR_ERR_CHECK(mpi_errno);
+
+        MPIR_Comm *win_comm;
+        MPIR_Group *win_group;
+        MPIR_Group_incl_impl(comm_group, 2, rank_list, &win_group);
+        MPIR_Comm_create_group_impl(comm, win_group, 0, &win_comm);
+
+        /* store the new rank id */
+        MPIR_Group_translate_ranks_impl(comm_group, 1, &dest, win_group,
+                                        &MPIDIG_PART_SREQUEST(*request, target_rank));
+
+        /* create the window, we use a 1-byte disp units, sender does not expose memory */
+        MPIR_Info win_info;
+        mpi_errno = MPIR_Info_set_impl(&win_info, "same_disp_unit", "true");
+        MPIR_ERR_CHECK(mpi_errno);
+        mpi_errno =
+            MPID_Win_create(NULL, 0, 1, &win_info, win_comm, &MPIDIG_PART_SREQUEST(*request, win));
+        MPIR_ERR_CHECK(mpi_errno);
+
+        /* free the groups, comms etc */
+        MPIR_Group_free_impl(comm_group);
+        MPIR_Group_free_impl(win_group);
+        MPIR_Comm_free_impl(win_comm);
+    }
 
   fn_exit:
     MPID_THREAD_CS_EXIT(VCI, MPIDI_VCI(0).lock);

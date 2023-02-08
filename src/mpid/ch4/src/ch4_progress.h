@@ -331,6 +331,14 @@ MPL_STATIC_INLINE_PREFIX int MPID_Progress_wait(MPID_Progress_state * state)
 
     state->progress_made = 0;
     while (1) {
+        char msg[512];
+        sprintf(msg, "test progress on VCIs: ");
+        for (int i = 0; i < state->vci_count; ++i) {
+            sprintf(msg, "%s %d ", msg, state->vci[i]);
+        }
+        fprintf(stdout, "%s \n", msg);
+        fflush(stdout);
+
         mpi_errno = MPIDI_progress_test(state, 1);
         MPIR_ERR_CHECK(mpi_errno);
         if (state->progress_made) {

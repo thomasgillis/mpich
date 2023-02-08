@@ -143,19 +143,20 @@ MPL_STATIC_INLINE_PREFIX void MPID_Part_send_request_free_hook(MPIR_Request * re
         MPL_free(cc_part);
     }
 
-    /* release the counter per msg */
+    /* release the counter per msg allocated for all the modes */
     MPIR_cc_t *cc_msg = MPIDIG_PART_REQUEST(req, u.send.cc_msg);
     if (cc_msg) {
         MPL_free(cc_msg);
     }
 
-    /* if we do tag, release the request array and decrease the cc value */
-    const bool do_tag = MPIDIG_PART_DO_TAG(req);
-    if (do_tag) {
+    /* clean-up TAG and RMA specific information */
+    if (MPIDIG_PART_DO_TAG(req)) {
         MPIR_Request **tag_req_ptr = MPIDIG_PART_SREQUEST(req, tag_req_ptr);
         MPIR_Assert(tag_req_ptr != NULL);
         MPL_free(tag_req_ptr);
         MPIR_cc_dec(&req->comm->part_context_cc);
+    } else if (MPIDIG_PART_DO_RMA(req)) {
+        MPID_Win_free(&MPIDIG_PART_SREQUEST(req, win));
     }
 
     MPIR_FUNC_EXIT;
@@ -169,13 +170,14 @@ MPL_STATIC_INLINE_PREFIX void MPID_Part_recv_request_free_hook(MPIR_Request * re
 
     /* TG: FIXME this function is in MPIDI and not MPIDIG */
     MPIR_Assert(req->kind == MPIR_REQUEST_KIND__PART_RECV);
-    const bool do_tag = MPIDIG_PART_DO_TAG(req);
-    if (do_tag) {
+    if (MPIDIG_PART_DO_TAG(req)) {
         MPIR_Request **tag_req_ptr = MPIDIG_PART_RREQUEST(req, tag_req_ptr);
         MPL_free(tag_req_ptr);
-    } else {
+    } else if (MPIDIG_PART_DO_AM(req)) {
         MPIR_cc_t *cc_part = MPIDIG_PART_RREQUEST(req, cc_part);
         MPL_free(cc_part);
+    } else if (MPIDIG_PART_DO_RMA(req)) {
+        MPID_Win_free(&MPIDIG_PART_RREQUEST(req, win));
     }
 
     MPIR_FUNC_EXIT;

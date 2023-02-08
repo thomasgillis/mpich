@@ -18,7 +18,6 @@ static int part_send_data_target_cmpl_cb(MPIR_Request * rreq)
     MPIR_Assert(MPIDIG_REQUEST(rreq, req->part_am_req.part_req_ptr));
 
     MPIDIG_recv_finish(rreq);
-
     /* need to tag the given partition as ready the counter must be 0 now */
     int incomplete;
     MPIR_cc_decr(MPIDIG_REQUEST(rreq, req->part_am_req.cc_part_ptr), &incomplete);
@@ -161,6 +160,7 @@ int MPIDIG_part_cts_target_msg_cb(void *am_hdr, void *data,
     if (unlikely(is_first_cts)) {
         MPIDIG_PART_REQUEST(part_sreq, msg_part) = msg_hdr->msg_part;
         MPIDIG_PART_REQUEST(part_sreq, peer_req_ptr) = msg_hdr->rreq_ptr;
+        MPIDIG_PART_SREQUEST(part_sreq, target_dtype) = msg_hdr->dtype;
 
         /* we need to allocate the data associated to the number of actual msgs */
         const int send_part = part_sreq->u.part.partitions;

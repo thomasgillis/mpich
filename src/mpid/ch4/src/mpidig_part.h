@@ -36,9 +36,10 @@ MPL_STATIC_INLINE_PREFIX int MPIDIG_part_start(MPIR_Request * request)
         const int msg_part = MPIDIG_PART_REQUEST(request, msg_part);
         MPIR_cc_set(request->cc_ptr, MPL_MAX(1, msg_part));
 
-        /* we have to reset information for the current iteration.
-         * The reset is done in the CTS reception callback as well but no msgs has been sent
-         * so it's safe to overwrite it*/
+        /* we have to reset information for the current iteration. In the TAG mode we don't recv a
+         * CTS every iteration so we need to make sure the counter is back to its value. The reset
+         * is done in the CTS reception callback as well but no msgs has been sent so it's safe to
+         * overwrite it */
         if (MPIDIG_PART_DO_TAG(request)) {
             MPIR_cc_set(&MPIDIG_PART_REQUEST(request, u.send.cc_send), msg_part);
         }
@@ -60,8 +61,7 @@ MPL_STATIC_INLINE_PREFIX int MPIDIG_part_start(MPIR_Request * request)
             }
             MPIR_Assert(MPIDIG_PART_REQUEST(request, msg_part) >= 0);
 
-            const bool do_tag = MPIDIG_PART_DO_TAG(request);
-            if (do_tag) {
+            if (MPIDIG_PART_DO_TAG(request)) {
                 /* in tag matching we issue the recv requests we need to remove the lock as the lock
                  * is re-acquired in the recv request creation*/
                 MPID_THREAD_CS_EXIT(VCI, MPIDI_VCI(0).lock);
@@ -76,8 +76,15 @@ MPL_STATIC_INLINE_PREFIX int MPIDIG_part_start(MPIR_Request * request)
                     MPIR_ERR_CHECK(mpi_errno);
                     MPIDIG_Part_rreq_status_first_cts(request);
                 }
-            } else {
+            } else if (MPIDIG_PART_DO_AM(request)) {
                 MPIDIG_part_rreq_reset_cc_part(request);
+                mpi_errno = MPIDIG_part_issue_cts(request);
+                MPIR_ERR_CHECK(mpi_errno);
+                if (!first_cts) {
+                    MPIDIG_Part_rreq_status_first_cts(request);
+                }
+            } else if (MPIDIG_PART_DO_RMA(request)) {
+                /* nothing to do for RMA */
                 mpi_errno = MPIDIG_part_issue_cts(request);
                 MPIR_ERR_CHECK(mpi_errno);
                 if (!first_cts) {

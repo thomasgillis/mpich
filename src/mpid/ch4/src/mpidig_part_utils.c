@@ -43,17 +43,17 @@ void MPIDIG_Part_rreq_allocate(MPIR_Request * rreq)
     MPIR_Assert(msg_part > 0);
 
     /* if we do the tag matching then we need an array of request */
-    const bool do_tag = MPIDIG_PART_DO_TAG(rreq);
-    if (do_tag) {
+    if (MPIDIG_PART_DO_TAG(rreq)) {
         MPIDIG_PART_RREQUEST(rreq, tag_req_ptr) =
             MPL_malloc(sizeof(MPIR_Request *) * msg_part, MPL_MEM_OTHER);
         for (int i = 0; i < msg_part; ++i) {
             MPIDIG_PART_RREQUEST(rreq, tag_req_ptr[i]) = NULL;
         }
-    } else {
+    } else if (MPIDIG_PART_DO_AM(rreq)) {
         MPIDIG_PART_RREQUEST(rreq, cc_part) =
             MPL_malloc(sizeof(MPIR_cc_t) * msg_part, MPL_MEM_OTHER);
     }
+    /* nothing to do for RMA */
 }
 
 /* called when a receive Request has been matched
@@ -81,7 +81,6 @@ void MPIDIG_part_rreq_matched(MPIR_Request * rreq)
     /* we must guarantee that the one partition on both the send and recv side corresponds to only
      * one actual msgs */
     MPIDIG_PART_REQUEST(rreq, msg_part) = MPL_gcd(send_part, recv_part);
-
     /* 0 partition is illegual so at least one message must happen */
     MPIR_Assert(MPIDIG_PART_REQUEST(rreq, msg_part) > 0);
 
@@ -99,8 +98,48 @@ void MPIDIG_part_rreq_matched(MPIR_Request * rreq)
         }
     }
 
+    /* when matched we can create the window */
+    if (MPIDIG_PART_DO_RMA(rreq)) {
+        /* create a comm exclusively for the send and recv */
+        MPIR_Group *comm_group;
+        int mpi_errno = MPIR_Comm_group_impl(rreq->comm, &comm_group);
+        MPIR_ERR_CHECK(mpi_errno);
+
+        int rank_list[2];
+        mpi_errno = MPIR_Comm_rank_impl(rreq->comm, rank_list);
+        rank_list[1] = MPIDI_PART_REQUEST(rreq, u.recv.source);
+        MPIR_ERR_CHECK(mpi_errno);
+
+        MPIR_Comm *win_comm;
+        MPIR_Group *win_group;
+        MPIR_Group_incl_impl(comm_group, 2, rank_list, &win_group);
+        MPIR_Comm_create_group_impl(rreq->comm, win_group, 0, &win_comm);
+
+        /* create the window, we use a 1-byte disp units, sender does not expose memory */
+        int win_size;
+        MPIR_Datatype_get_extent_macro(MPIDI_PART_REQUEST(rreq, datatype), win_size);
+        win_size *= MPIDI_PART_REQUEST(rreq, count) * rreq->u.part.partitions;
+        void *buf = MPIDI_PART_REQUEST(rreq, buffer);
+        MPIR_Info win_info;
+        mpi_errno = MPIR_Info_set_impl(&win_info, "same_disp_unit", "true");
+        MPIR_ERR_CHECK(mpi_errno);
+        mpi_errno = MPID_Win_create(buf, win_size, 1, &win_info, win_comm,
+                                    &MPIDIG_PART_RREQUEST(rreq, win));
+        MPIR_ERR_CHECK(mpi_errno);
+
+        /* free the groups, comms etc */
+        MPIR_Group_free_impl(comm_group);
+        MPIR_Group_free_impl(win_group);
+        MPIR_Comm_free_impl(win_comm);
+    }
+
     /* indicate that we have matched */
     MPIDIG_Part_rreq_status_matched(rreq);
+
+  fn_exit:
+    return;
+  fn_fail:
+    goto fn_exit;
 }
 
 /* partition recv request - reset cc_part array of an activated request */
@@ -124,6 +163,7 @@ void MPIDIG_part_sreq_set_cc_part(MPIR_Request * rqst)
 {
     MPIR_Assert(rqst->kind == MPIR_REQUEST_KIND__PART_SEND);
 
+    /* if we do tag matching we have to use a special init value */
     const int init_value = MPIDIG_PART_DO_TAG(rqst) ? MPIDIG_PART_STATUS_SEND_TAG_FIRST_INIT
         : MPIDIG_PART_STATUS_SEND_AM_INIT;
     const int send_part = rqst->u.part.partitions;
@@ -141,7 +181,7 @@ void MPIDIG_part_rreq_update_sinfo(MPIR_Request * rreq, MPIDIG_part_send_init_ms
 
     MPIDIG_PART_REQUEST(rreq, u.recv.send_dsize) = msg_hdr->data_sz;
     /* if do_tag in the header, mode is 1 */
-    MPIDIG_PART_REQUEST(rreq, mode) = msg_hdr->do_tag;
+    MPIDIG_PART_REQUEST(rreq, mode) = msg_hdr->mode;
     /* store the sender number of partitions in the msg_part temporarily */
     MPIDIG_PART_REQUEST(rreq, msg_part) = msg_hdr->send_npart;
     MPIR_Assert(MPIDIG_PART_REQUEST(rreq, msg_part) > 0);

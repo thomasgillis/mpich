@@ -225,13 +225,18 @@ typedef struct MPIDI_prequest {
     MPI_Datatype datatype;
 } MPIDI_prequest_t;
 
-/* info for MPIDIG SEND implementation, access with MPIDIG_PART_SREQUEST()*/
+/* access with MPIDIG_PART_SREQUEST()*/
 typedef struct MPIDIG_part_sreq {
     MPIR_cc_t cc_send;          /* counter on the number of msgs actually sent */
     MPIR_cc_t *cc_part;         /* ready counter per partition */
     MPIR_cc_t *cc_msg;          /* ready counter per message, must be different than the partition one */
     union {
         MPIR_Request **tag_req_ptr;     /* TAG only: pointers to the children request */
+        struct {
+            int target_rank;    /* rank id in the window communicator */
+            MPI_Datatype target_dtype;
+            MPIR_Win *win;      /* RMA only: window to exchange memory */
+        };
     };
 } MPIDIG_part_sreq_t;
 
@@ -244,6 +249,8 @@ typedef struct MPIDIG_part_rreq {
         MPIR_cc_t *cc_part;
         /* TAG only data */
         MPIR_Request **tag_req_ptr;
+        /* RMA only */
+        MPIR_Win *win;          /* RMA only: window to exchange memory */
     };
 } MPIDIG_part_rreq_t;
 
@@ -354,6 +361,7 @@ typedef struct MPIDI_Devreq_t {
 #define MPIDIG_PART_RREQUEST(req, field) (((req)->dev.ch4.part_req).part.u.recv.field)
 #define MPIDIG_PART_DO_AM(req) (MPIDIG_PART_REQUEST(req, mode) == 0)
 #define MPIDIG_PART_DO_TAG(req) (MPIDIG_PART_REQUEST(req, mode) == 1)
+#define MPIDIG_PART_DO_RMA(req) (MPIDIG_PART_REQUEST(req, mode) == 2)
 
 #define MPIDIG_REQUEST_IN_PROGRESS(r)   ((r)->dev.ch4.am.req->status & MPIDIG_REQ_IN_PROGRESS)
 
