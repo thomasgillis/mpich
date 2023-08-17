@@ -47,9 +47,30 @@ typedef enum {
     MPL_GPU_TYPE_HIP,
 } MPL_gpu_type_t;
 
+typedef enum {
+    MPL_GPU_ENGINE_TYPE_COMPUTE = 0,
+    MPL_GPU_ENGINE_TYPE_COPY_HIGH_BANDWIDTH,
+    MPL_GPU_ENGINE_TYPE_COPY_LOW_LATENCY,
+    MPL_GPU_ENGINE_TYPE_LAST,
+} MPL_gpu_engine_type_t;
+
+#define MPL_GPU_ENGINE_NUM_TYPES 3
+
+typedef enum {
+    MPL_GPU_COPY_D2H = 0,
+    MPL_GPU_COPY_H2D,
+    MPL_GPU_COPY_D2D_INCOMING,
+    MPL_GPU_COPY_D2D_OUTGOING,
+    MPL_GPU_COPY_DIRECTION_NONE,
+} MPL_gpu_copy_direction_t;
+
+#define MPL_GPU_COPY_DIRECTION_TYPES 4
+
 typedef struct {
     /* Input */
     int debug_summary;
+    bool use_immediate_cmdlist;
+    bool roundrobin_cmdq;
     /* Output */
     bool enable_ipc;
     MPL_gpu_ipc_handle_type_t ipc_handle_type;
@@ -69,15 +90,27 @@ static inline int MPL_gpu_query_pointer_attr(const void *ptr, MPL_pointer_attr_t
     return MPL_SUCCESS;
 }
 
+static inline int MPL_gpu_query_pointer_is_dev(const void *ptr, MPL_pointer_attr_t * attr)
+{
+    return 0;
+}
+
+static inline int MPL_gpu_query_is_same_dev(int dev1, int dev2)
+{
+    return dev1 == dev2;
+}
 #endif /* ! MPL_HAVE_GPU */
 
 int MPL_gpu_query_support(MPL_gpu_type_t * type);
 int MPL_gpu_query_pointer_attr(const void *ptr, MPL_pointer_attr_t * attr);
+int MPL_gpu_query_pointer_is_dev(const void *ptr, MPL_pointer_attr_t * attr);
+int MPL_gpu_query_is_same_dev(int dev1, int dev2);
 
-int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_ipc_mem_handle_t * ipc_handle);
+int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_device_attr * ptr_attr,
+                              MPL_gpu_ipc_mem_handle_t * mpl_ipc_handle);
 /* Used in ipc_handle_free_hook. Needed for fd-based ipc mechanism. */
 int MPL_gpu_ipc_handle_destroy(const void *ptr, MPL_pointer_attr_t * gpu_attr);
-int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t ipc_handle, int dev_id, void **ptr);
+int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t * mpl_ipc_handle, int dev_id, void **ptr);
 int MPL_gpu_ipc_handle_unmap(void *ptr);
 
 int MPL_gpu_malloc_host(void **ptr, size_t size);
@@ -107,6 +140,11 @@ int MPL_gpu_init_device_mappings(int max_devid, int max_subdev_id);
 
 int MPL_gpu_fast_memcpy(void *src, MPL_pointer_attr_t * src_attr, void *dest,
                         MPL_pointer_attr_t * dest_attr, size_t size);
+
+int MPL_gpu_imemcpy(void *dest_ptr, void *src_ptr, size_t size, int dev,
+                    MPL_gpu_copy_direction_t dir, MPL_gpu_engine_type_t engine_type,
+                    MPL_gpu_request * req, bool commit);
+int MPL_gpu_test(MPL_gpu_request * req, int *completed);
 
 typedef void (*MPL_gpu_hostfn) (void *data);
 int MPL_gpu_launch_hostfn(MPL_gpu_stream_t stream, MPL_gpu_hostfn fn, void *data);

@@ -29,7 +29,6 @@ typedef enum MPIR_Comm_hierarchy_kind_t {
     MPIR_COMM_HIERARCHY_KIND__NODE_ROOTS = 2,   /* is the subcomm for node roots */
     MPIR_COMM_HIERARCHY_KIND__NODE = 3, /* is the subcomm for a node */
     MPIR_COMM_HIERARCHY_KIND__MULTI_LEADS = 4,  /* is the multi_leaders_comm for a node */
-    MPIR_COMM_HIERARCHY_KIND__SIZE      /* cardinality of this enum */
 } MPIR_Comm_hierarchy_kind_t;
 
 typedef enum {
@@ -215,6 +214,9 @@ struct MPIR_Comm {
      */
     int tainted;
 
+    /* due to the current TAG space (see mpir_tags.h) we can only use a fixed number of
+     * simultaneous partitioned communication at a time and this counter keeps track of it */
+    MPIR_cc_t part_context_cc;
 
     int hints[MPIR_COMM_HINT_MAX];      /* Hints to the communicator
                                          * use int array for fast access */
@@ -259,6 +261,8 @@ struct MPIR_Comm {
         } multiplex;
     } stream_comm;
 
+    MPIR_Request *persistent_requests;
+
     /* Other, device-specific information */
 #ifdef MPID_DEV_COMM_DECL
      MPID_DEV_COMM_DECL
@@ -289,10 +293,11 @@ MPL_STATIC_INLINE_PREFIX MPIR_Stream *MPIR_stream_comm_get_local_stream(MPIR_Com
     }
 }
 
+/* We never skip reference counting for built-in comms */
 #define MPIR_Comm_add_ref(comm_p_) \
-    do { MPIR_Object_add_ref((comm_p_)); } while (0)
+    do { MPIR_Object_add_ref_always((comm_p_)); } while (0)
 #define MPIR_Comm_release_ref(comm_p_, inuse_) \
-    do { MPIR_Object_release_ref(comm_p_, inuse_); } while (0)
+    do { MPIR_Object_release_ref_always(comm_p_, inuse_); } while (0)
 
 
 /* Release a reference to a communicator.  If there are no pending
@@ -348,11 +353,6 @@ MPL_STATIC_INLINE_PREFIX int MPIR_Stream_comm_set_attr(MPIR_Comm * comm, int src
 }
 
 
-/* MPIR_Comm_release_always is the same as MPIR_Comm_release except it uses
-   MPIR_Comm_release_ref_always instead.
-*/
-int MPIR_Comm_release_always(MPIR_Comm * comm_ptr);
-
 int MPIR_Comm_create(MPIR_Comm **);
 int MPIR_Comm_create_intra(MPIR_Comm * comm_ptr, MPIR_Group * group_ptr, MPIR_Comm ** newcomm_ptr);
 int MPIR_Comm_create_inter(MPIR_Comm * comm_ptr, MPIR_Group * group_ptr, MPIR_Comm ** newcomm_ptr);
@@ -373,6 +373,10 @@ int MPIR_Comm_split_filesystem(MPI_Comm comm, int key, const char *dirname, MPI_
 
 #define MPIR_Comm_rank(comm_ptr) ((comm_ptr)->rank)
 #define MPIR_Comm_size(comm_ptr) ((comm_ptr)->local_size)
+
+int MPIR_Comm_save_inactive_request(MPIR_Comm * comm, MPIR_Request * request);
+int MPIR_Comm_delete_inactive_request(MPIR_Comm * comm, MPIR_Request * request);
+int MPIR_Comm_free_inactive_requests(MPIR_Comm * comm);
 
 /* Comm hint registration.
  *

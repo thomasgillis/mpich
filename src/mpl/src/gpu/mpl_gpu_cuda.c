@@ -131,7 +131,24 @@ int MPL_gpu_query_pointer_attr(const void *ptr, MPL_pointer_attr_t * attr)
     goto fn_exit;
 }
 
-int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_ipc_mem_handle_t * ipc_handle)
+int MPL_gpu_query_pointer_is_dev(const void *ptr, MPL_pointer_attr_t * attr)
+{
+    MPL_pointer_attr_t a;
+
+    if (attr == NULL) {
+        MPL_gpu_query_pointer_attr(ptr, &a);
+        attr = &a;
+    }
+    return attr->type == MPL_GPU_POINTER_DEV;
+}
+
+int MPL_gpu_query_is_same_dev(int dev1, int dev2)
+{
+    return dev1 == dev2;
+}
+
+int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_device_attr * ptr_attr,
+                              MPL_gpu_ipc_mem_handle_t * ipc_handle)
 {
     int mpl_err = MPL_SUCCESS;
     cudaError_t ret;
@@ -151,7 +168,7 @@ int MPL_gpu_ipc_handle_destroy(const void *ptr, MPL_pointer_attr_t * gpu_attr)
     return MPL_SUCCESS;
 }
 
-int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t ipc_handle, int dev_id, void **ptr)
+int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t * ipc_handle, int dev_id, void **ptr)
 {
     int mpl_err = MPL_SUCCESS;
     cudaError_t ret;
@@ -159,7 +176,7 @@ int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t ipc_handle, int dev_id, void
 
     cudaGetDevice(&prev_devid);
     cudaSetDevice(dev_id);
-    ret = cudaIpcOpenMemHandle(ptr, ipc_handle, cudaIpcMemLazyEnablePeerAccess);
+    ret = cudaIpcOpenMemHandle(ptr, *ipc_handle, cudaIpcMemLazyEnablePeerAccess);
     CUDA_ERR_CHECK(ret);
 
   fn_exit:
@@ -495,6 +512,18 @@ cudaError_t CUDARTAPI cudaFree(void *dptr)
 
 int MPL_gpu_fast_memcpy(void *src, MPL_pointer_attr_t * src_attr, void *dest,
                         MPL_pointer_attr_t * dest_attr, size_t size)
+{
+    return MPL_ERR_GPU_INTERNAL;
+}
+
+int MPL_gpu_imemcpy(void *dest_ptr, void *src_ptr, size_t size, int dev,
+                    MPL_gpu_copy_direction_t dir, MPL_gpu_engine_type_t engine_type,
+                    MPL_gpu_request * req, bool commit)
+{
+    return MPL_ERR_GPU_INTERNAL;
+}
+
+int MPL_gpu_test(MPL_gpu_request * req, int *completed)
 {
     return MPL_ERR_GPU_INTERNAL;
 }

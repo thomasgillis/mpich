@@ -23,9 +23,6 @@
      : __FILE__                                 \
 )
 
-/* TODO: This should come from provider capability */
-#define MPIDI_OFI_MAX_VNIS                  16
-
 #define MPIDI_OFI_MAP_NOT_FOUND            ((void*)(-1UL))
 #define MPIDI_OFI_DEFAULT_SHORT_SEND_SIZE  (16 * 1024)
 #define MPIDI_OFI_MAX_NUM_AM_BUFFERS       (8)
@@ -304,6 +301,7 @@ typedef struct {
     unsigned enable_mr_register_null:1;
     unsigned enable_atomics:1;
     unsigned enable_pt2pt_nopack:1;
+    unsigned enable_triggered:1;
     unsigned enable_hmem:1;
     unsigned enable_data_auto_progress:1;
     unsigned enable_control_auto_progress:1;
@@ -367,8 +365,8 @@ typedef struct {
 
     /* Mutexes and endpoints */
     MPIDI_OFI_cacheline_mutex_t mutexes[MAX_OFI_MUTEXES];
-    MPIDI_OFI_context_t ctx[MPIDI_OFI_MAX_VNIS * MPIDI_OFI_MAX_NICS];
-    MPIDI_OFI_per_vci_t per_vci[MPIDI_OFI_MAX_VNIS];
+    MPIDI_OFI_context_t ctx[MPIDI_CH4_MAX_VCIS * MPIDI_OFI_MAX_NICS];
+    MPIDI_OFI_per_vci_t per_vci[MPIDI_CH4_MAX_VCIS];
     int num_vcis;
     int num_nics;
     int num_close_nics;

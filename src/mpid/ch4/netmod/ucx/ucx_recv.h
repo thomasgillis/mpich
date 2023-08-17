@@ -19,16 +19,25 @@ MPL_STATIC_INLINE_PREFIX void MPIDI_UCX_recv_cmpl_cb(void *request, ucs_status_t
 
     if (unlikely(status == UCS_ERR_CANCELED)) {
         MPIR_STATUS_SET_CANCEL_BIT(rreq->status, TRUE);
-    } else if (unlikely(status == UCS_ERR_MESSAGE_TRUNCATED)) {
-        rreq->status.MPI_ERROR = MPI_ERR_TRUNCATE;
-        rreq->status.MPI_SOURCE = MPIDI_UCX_get_source(info->sender_tag);
-        rreq->status.MPI_TAG = MPIDI_UCX_get_tag(info->sender_tag);
     } else {
-        MPI_Aint count = info->length;
-        rreq->status.MPI_ERROR = MPI_SUCCESS;
-        rreq->status.MPI_SOURCE = MPIDI_UCX_get_source(info->sender_tag);
-        rreq->status.MPI_TAG = MPIDI_UCX_get_tag(info->sender_tag);
-        MPIR_STATUS_SET_COUNT(rreq->status, count);
+        if (unlikely(status == UCS_ERR_MESSAGE_TRUNCATED)) {
+            rreq->status.MPI_ERROR = MPI_ERR_TRUNCATE;
+            rreq->status.MPI_SOURCE = MPIDI_UCX_get_source(info->sender_tag);
+            rreq->status.MPI_TAG = MPIDI_UCX_get_tag(info->sender_tag);
+        } else {
+            MPI_Aint count = info->length;
+            rreq->status.MPI_ERROR = MPI_SUCCESS;
+            rreq->status.MPI_SOURCE = MPIDI_UCX_get_source(info->sender_tag);
+            rreq->status.MPI_TAG = MPIDI_UCX_get_tag(info->sender_tag);
+            MPIR_STATUS_SET_COUNT(rreq->status, count);
+        }
+#ifndef MPIDI_CH4_DIRECT_NETMOD
+        int is_cancelled;
+        MPIDI_anysrc_try_cancel_partner(rreq, &is_cancelled);
+        /* Cancel SHM partner is always successful */
+        MPIR_Assert(is_cancelled);
+        MPIDI_anysrc_free_partner(rreq);
+#endif
     }
 
     MPIDI_Request_complete_fast(rreq);
@@ -88,6 +97,8 @@ MPL_STATIC_INLINE_PREFIX int MPIDI_UCX_recv(void *buf,
     if (req == NULL) {
         req = MPIR_Request_create_from_pool(MPIR_REQUEST_KIND__RECV, vci_dst, 2);
         MPIR_ERR_CHKANDSTMT(req == NULL, mpi_errno, MPIX_ERR_NOREQ, goto fn_fail, "**nomemreq");
+        req->comm = comm;
+        MPIR_Comm_add_ref(comm);
     } else {
         MPIR_Request_add_ref(req);
     }
@@ -202,8 +213,9 @@ MPL_STATIC_INLINE_PREFIX int MPIDI_NM_mpi_irecv(void *buf,
                                                 int rank,
                                                 int tag,
                                                 MPIR_Comm * comm, int attr,
-                                                MPIDI_av_entry_t * addr, MPIR_Request ** request,
-                                                MPIR_Request * partner)
+                                                MPIDI_av_entry_t * addr,
+                                                MPIR_cc_t * parent_cc_ptr,
+                                                MPIR_Request ** request, MPIR_Request * partner)
 {
     int mpi_errno;
     MPIR_FUNC_ENTER;
@@ -213,12 +225,34 @@ MPL_STATIC_INLINE_PREFIX int MPIDI_NM_mpi_irecv(void *buf,
     int vci_dst;
     MPIDI_UCX_RECV_VNIS(vci_dst);
 
-    MPIDI_UCX_THREAD_CS_ENTER_VCI(vci_dst);
+    int need_cs;
+#ifdef MPIDI_CH4_DIRECT_NETMOD
+    need_cs = true;
+#else
+    need_cs = (rank != MPI_ANY_SOURCE);
+#endif
+
+    if (need_cs) {
+        MPIDI_UCX_THREAD_CS_ENTER_VCI(vci_dst);
+    }
     mpi_errno =
         MPIDI_UCX_recv(buf, count, datatype, rank, tag, comm, context_offset, addr, vci_dst,
                        request);
     MPIDI_REQUEST_SET_LOCAL(*request, 0, partner);
-    MPIDI_UCX_THREAD_CS_EXIT_VCI(vci_dst);
+
+    /* if the parent_cc_ptr exists */
+    if (parent_cc_ptr) {
+        if (MPIR_Request_is_complete(*request)) {
+            /* if the request is already completed, decrement the parent counter */
+            MPIR_cc_dec(parent_cc_ptr);
+        } else {
+            /* if the request is not done yet, assign the completion pointer to the parent one and it will be decremented later */
+            (*request)->dev.completion_notification = parent_cc_ptr;
+        }
+    }
+    if (need_cs) {
+        MPIDI_UCX_THREAD_CS_EXIT_VCI(vci_dst);
+    }
 
     MPIR_FUNC_EXIT;
     return mpi_errno;

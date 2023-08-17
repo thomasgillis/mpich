@@ -8,40 +8,6 @@
 
 #include "mpir_process.h"
 
-/*
-=== BEGIN_MPI_T_CVAR_INFO_BLOCK ===
-
-categories :
-    - name : REQUEST
-      description : A category for requests management variables
-
-cvars:
-    - name        : MPIR_CVAR_REQUEST_POLL_FREQ
-      category    : REQUEST
-      type        : int
-      default     : 8
-      class       : none
-      verbosity   : MPI_T_VERBOSITY_USER_BASIC
-      scope       : MPI_T_SCOPE_LOCAL
-      description : >-
-        How frequent to poll during completion calls (wait/test) in terms
-        of number of processed requests before polling.
-
-    - name        : MPIR_CVAR_REQUEST_BATCH_SIZE
-      category    : REQUEST
-      type        : int
-      default     : 64
-      class       : none
-      verbosity   : MPI_T_VERBOSITY_USER_BASIC
-      scope       : MPI_T_SCOPE_LOCAL
-      description : >-
-        The number of requests to make completion as a batch
-        in MPI_Waitall and MPI_Testall implementation. A large number
-        is likely to cause more cache misses.
-
-=== END_MPI_T_CVAR_INFO_BLOCK ===
-*/
-
 /* NOTE-R1: MPIR_REQUEST_KIND__MPROBE signifies that this is a request created by
  * MPI_Mprobe or MPI_Improbe.  Since we use MPI_Request objects as our
  * MPI_Message objects, we use this separate kind in order to provide stronger
@@ -130,6 +96,7 @@ typedef struct MPIR_Grequest_class {
 extern MPIR_Grequest_class MPIR_Grequest_class_direct[];
 extern MPIR_Object_alloc_t MPIR_Grequest_class_mem;
 
+#ifndef ENABLE_THREADCOMM
 #define MPIR_Request_extract_status(request_ptr_, status_)              \
     {                                                                   \
         if ((status_) != MPI_STATUS_IGNORE)                             \
@@ -146,6 +113,22 @@ extern MPIR_Object_alloc_t MPIR_Grequest_class_mem;
             (status_)->MPI_ERROR = error__;                             \
         }                                                               \
     }
+#else
+/* Same as above but with additional threadcomm tag reset */
+#define MPIR_Request_extract_status(request_ptr_, status_)              \
+    do {                                                                \
+        if ((status_) != MPI_STATUS_IGNORE) {                           \
+            int error__;                                                \
+            error__ = (status_)->MPI_ERROR;                             \
+            *(status_) = (request_ptr_)->status;                        \
+            (status_)->MPI_ERROR = error__;                             \
+                                                                        \
+            if ((request_ptr_)->comm && (request_ptr_)->comm->threadcomm) { \
+                MPIR_Threadcomm_adjust_status((request_ptr_)->comm->threadcomm, status_); \
+            } \
+        }                                                               \
+    } while (0)
+#endif
 
 #define MPIR_Request_is_complete(req_) (MPIR_cc_is_complete((req_)->cc_ptr))
 
@@ -171,6 +154,8 @@ enum MPIR_sched_type {
   (e.g., 'MPIR_Request_send_t') that extends the 'MPIR_Request'.
 
   S*/
+
+#define MPIR_REQUEST_UNION_SIZE  40
 struct MPIR_Request {
     MPIR_OBJECT_HEADER;         /* adds handle and ref_count fields */
 
@@ -222,6 +207,9 @@ struct MPIR_Request {
         struct {
             MPIR_Win *win;
         } rma;                  /* kind : MPIR_REQUEST_KIND__RMA */
+        /* Reserve space for local usages. For example, threadcomm, the actual struct
+         * is defined locally and is used via casting */
+        char dummy[MPIR_REQUEST_UNION_SIZE];
     } u;
 
 #if defined HAVE_DEBUGGER_SUPPORT
@@ -231,6 +219,7 @@ struct MPIR_Request {
 #endif                          /* HAVE_DEBUGGER_SUPPORT */
 
     struct MPIR_Request *next, *prev;
+    UT_hash_handle hh;
 
     /* Other, device-specific information */
 #ifdef MPID_DEV_REQUEST_DECL
@@ -487,15 +476,12 @@ MPL_STATIC_INLINE_PREFIX MPIR_Request *MPIR_Request_create_null_recv(void)
 
 static inline void MPIR_Request_free_with_safety(MPIR_Request * req, int need_safety)
 {
-    int inuse;
     int pool = MPIR_REQUEST_POOL(req);
 
     if (HANDLE_IS_BUILTIN(req->handle)) {
         /* do not free builtin request objects */
         return;
     }
-
-    MPIR_Request_release_ref(req, &inuse);
 
     if (need_safety) {
         MPID_THREAD_CS_ENTER(VCI, (*(MPID_Thread_mutex_t *) MPIR_Request_mem[pool].lock));
@@ -507,6 +493,8 @@ static inline void MPIR_Request_free_with_safety(MPIR_Request * req, int need_sa
      * this request */
     MPID_Request_free_hook(req);
 
+    int inuse;
+    MPIR_Request_release_ref(req, &inuse);
     if (inuse == 0) {
         MPL_DBG_MSG_P(MPIR_DBG_REQUEST, VERBOSE, "freeing request, handle=0x%08x", req->handle);
 
@@ -534,6 +522,9 @@ static inline void MPIR_Request_free_with_safety(MPIR_Request * req, int need_sa
         /* FIXME: We need a way to call these routines ONLY when the
          * related ref count has become zero. */
         if (req->comm != NULL) {
+            if (MPIR_Request_is_persistent(req)) {
+                MPIR_Comm_delete_inactive_request(req->comm, req);
+            }
             MPIR_Comm_release(req->comm);
         }
 

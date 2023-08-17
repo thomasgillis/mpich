@@ -8,6 +8,7 @@
 #include "ofi_am_impl.h"
 #include "ofi_noinline.h"
 #include "mpir_hwtopo.h"
+#include "ofi_csel_container.h"
 #include "ofi_init.h"
 
 /*
@@ -428,6 +429,16 @@ cvars:
       description : >-
         If true and all nodes do not have the same number of NICs, MPICH will fall back
         to using the fewest number of NICs instead of returning an error.
+
+    - name        : MPIR_CVAR_CH4_OFI_ENABLE_TRIGGERED
+      category    : CH4_OFI
+      type        : int
+      default     : -1
+      class       : device
+      verbosity   : MPI_T_VERBOSITY_USER_BASIC
+      scope       : MPI_T_SCOPE_LOCAL
+      description : >-
+        If true, enable OFI triggered ops for MPI collectives.
 
 === END_MPI_T_CVAR_INFO_BLOCK ===
 */
@@ -882,8 +893,10 @@ int MPIDI_OFI_mpi_finalize_hook(void)
     for (int nic = MPIDI_OFI_global.num_nics - 1; nic >= 0; nic--) {
         for (int vci = MPIDI_OFI_global.num_vcis - 1; vci >= 0; vci--) {
             if (MPIDI_global.is_initialized || (vci == 0 && nic == 0)) {
-                mpi_errno = destroy_vci_context(vci, nic);
-                MPIR_ERR_CHECK(mpi_errno);
+                /* If the user has not freed all MPI objects, ofi might not shut down cleanly.
+                 * We intentionally ignore errors to avoid crashing in finalize. Debug builds
+                 * will warn about unfreed objects/memory. */
+                (void) destroy_vci_context(vci, nic);
             }
         }
     }
@@ -1438,6 +1451,7 @@ static void dump_global_settings(void)
     fprintf(stdout, "MPIDI_OFI_ENABLE_CONTROL_AUTO_PROGRESS: %d\n",
             MPIDI_OFI_ENABLE_CONTROL_AUTO_PROGRESS);
     fprintf(stdout, "MPIDI_OFI_ENABLE_PT2PT_NOPACK: %d\n", MPIDI_OFI_ENABLE_PT2PT_NOPACK);
+    fprintf(stdout, "MPIDI_OFI_ENABLE_TRIGGERED: %d\n", MPIDI_OFI_ENABLE_TRIGGERED);
     fprintf(stdout, "MPIDI_OFI_ENABLE_HMEM: %d\n", MPIDI_OFI_ENABLE_HMEM);
     fprintf(stdout, "MPIDI_OFI_NUM_AM_BUFFERS: %d\n", MPIDI_OFI_NUM_AM_BUFFERS);
     fprintf(stdout, "MPIDI_OFI_NUM_OPTIMIZED_MEMORY_REGIONS: %d\n",

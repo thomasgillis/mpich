@@ -31,7 +31,8 @@ int MPL_gpu_init_device_mappings(int max_devid, int max_subdev_id)
     return MPL_SUCCESS;
 }
 
-int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_ipc_mem_handle_t * ipc_handle)
+int MPL_gpu_ipc_handle_create(const void *ptr, MPL_gpu_device_attr * ptr_attr,
+                              MPL_gpu_ipc_mem_handle_t * ipc_handle)
 {
     abort();
     return MPL_ERR_GPU_INTERNAL;
@@ -43,7 +44,7 @@ int MPL_gpu_ipc_handle_destroy(const void *ptr, MPL_pointer_attr_t * gpu_attr)
     return MPL_ERR_GPU_INTERNAL;
 }
 
-int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t ipc_handle, int dev_id, void **ptr)
+int MPL_gpu_ipc_handle_map(MPL_gpu_ipc_mem_handle_t * ipc_handle, int dev_id, void **ptr)
 {
     abort();
     return MPL_ERR_GPU_INTERNAL;
@@ -133,6 +134,18 @@ int MPL_gpu_free_hook_register(void (*free_hook) (void *dptr))
 
 int MPL_gpu_fast_memcpy(void *src, MPL_pointer_attr_t * src_attr, void *dest,
                         MPL_pointer_attr_t * dest_attr, size_t size)
+{
+    return MPL_ERR_GPU_INTERNAL;
+}
+
+int MPL_gpu_imemcpy(void *dest_ptr, void *src_ptr, size_t size, int dev,
+                    MPL_gpu_copy_direction_t dir, MPL_gpu_engine_type_t engine_type,
+                    MPL_gpu_request * req, bool commit)
+{
+    return MPL_ERR_GPU_INTERNAL;
+}
+
+int MPL_gpu_test(MPL_gpu_request * req, int *completed)
 {
     return MPL_ERR_GPU_INTERNAL;
 }
