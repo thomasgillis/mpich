@@ -252,6 +252,7 @@ typedef struct MPIDI_per_vci {
     MPIDIG_req_ext_t *cmpl_list;
     MPL_atomic_uint64_t exp_seq_no;
     MPL_atomic_uint64_t nxt_seq_no;
+    MPL_atomic_int_t progress_count;
 
     bool allocated;
     char pad MPL_ATTR_ALIGNED(MPL_CACHELINE_SIZE);

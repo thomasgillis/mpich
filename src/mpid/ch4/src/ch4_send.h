@@ -90,7 +90,7 @@ MPL_STATIC_INLINE_PREFIX int MPID_Isend_parent(const void *buf,
     MPIDI_av_entry_t *av = NULL;
     MPIR_FUNC_ENTER;
 
-    if (MPIDI_is_self_comm(comm)) {
+    if (MPIR_is_self_comm(comm)) {
         mpi_errno =
             MPIDI_Self_isend(buf, count, datatype, rank, tag, comm, attr, parent_cc_ptr, request);
     } else {

@@ -272,7 +272,7 @@ MPL_STATIC_INLINE_PREFIX int MPID_Irecv_parent(void *buf,
     int mpi_errno = MPI_SUCCESS;
     MPIR_FUNC_ENTER;
 
-    if (MPIDI_is_self_comm(comm)) {
+    if (MPIR_is_self_comm(comm)) {
         mpi_errno =
             MPIDI_Self_irecv(buf, count, datatype, rank, tag, comm, attr, parent_cc_ptr, request);
     } else {
