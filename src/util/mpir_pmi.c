@@ -89,7 +89,7 @@ cvars:
 #define INFO_TYPE_VAL(kv) (kv).value
 
 #else
-/* PMI_keyval_t and PMI2_keyval_t are compatible */
+/* PMI2_keyval_t and PMI2_keyval_t are compatible */
 typedef struct {
     const char *key;
     const char *val;
