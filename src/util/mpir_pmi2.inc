@@ -99,7 +99,9 @@ static int pmi2_barrier(void)
                          "**pmi_kvsfence", "**pmi_kvsfence %d", pmi_errno);
     /* Get a non-existent key, it only returns after every process called fence */
     int out_len;
-    PMI2_KVS_Get(pmi_kvs_name, PMI2_ID_NULL, "-NONEXIST-KEY", NULL, 0, &out_len);
+    // FIXME: warnings with Cray-PMI2 on Perlmutter. Commenting out. May need a 
+    // proper fix if some codes break.
+    //PMI2_KVS_Get(pmi_kvs_name, PMI2_ID_NULL, "-NONEXIST-KEY", NULL, 0, &out_len);
 
   fn_exit:
     return mpi_errno;
